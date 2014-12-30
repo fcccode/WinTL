@@ -56,6 +56,42 @@ private:
     atomic_ulong refcnt_;
 };
 
+template<class T>
+class ref final {
+public:
+    template<class Y>
+    explicit ref(Y *ptr = nullptr) : ptr_(ptr) = default
+    {
+    }
+
+    template<class Y>
+    ref(const ref<Y>& that) : ptr_(that.ptr_)
+    {
+        if (ptr_) ptr_->incref();
+    }
+
+    ~ref()
+    {
+        if (ptr_) ptr_->decref();
+    }
+
+    T * operator->() const
+    {
+        return ptr_;
+    }
+
+    template<class Y>
+    ref& operator=(const ref<Y>& that)
+    {
+        if (ptr_) ptr_->decref();
+        ptr_ = that.ptr_;
+        if (ptr_) ptr_->incref();
+        return *this;
+    }
+private:
+    T *ptr_;
+};
+
 } // namespace win32
 
 #endif // WIN32_OBJECT_HPP_INCLUDED
