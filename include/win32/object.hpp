@@ -88,6 +88,14 @@ public:
         if (ptr_) ptr_->incref();
         return *this;
     }
+
+    void clear()
+    {
+        if (ptr_) {
+            ptr_->decref();
+            ptr_ = nullptr;
+        }
+    }
 private:
     T *ptr_;
 };
