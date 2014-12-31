@@ -24,6 +24,8 @@
 
 #include <win32/object.hpp>
 
+#include <utility>
+
 #include <windows.h>
 
 namespace win32 {
@@ -35,9 +37,19 @@ public:
     {
     }
 
+    handle(handle&& src) : data_(std::move(src.data_))
+    {
+    }
+
     operator HANDLE() const
     {
         return data_->handle();
+    }
+
+    handle& operator=(handle&& src)
+    {
+        data_ = std::move(src.data_);
+        return *this;
     }
 protected:
     class handle_data : public refcounting {
