@@ -65,6 +65,12 @@ public:
     }
 
     template<class Y>
+    ref(ref<Y>&& src) : ptr_(src.ptr_)
+    {
+        src.ptr_ = nullptr;
+    }
+
+    template<class Y>
     ref(const ref<Y>& that) : ptr_(that.ptr_)
     {
         if (ptr_) ptr_->incref();
@@ -86,6 +92,15 @@ public:
         if (ptr_) ptr_->decref();
         ptr_ = that.ptr_;
         if (ptr_) ptr_->incref();
+        return *this;
+    }
+
+    template<class Y>
+    ref<T>& operator=(ref<Y>&& src)
+    {
+        if (ptr_) ptr_->decref();
+        ptr_ = src.ptr_;
+        src.ptr_ = nullptr;
         return *this;
     }
 
