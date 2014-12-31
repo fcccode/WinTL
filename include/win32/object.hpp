@@ -96,6 +96,13 @@ public:
             ptr_ = nullptr;
         }
     }
+
+    T * detach()
+    {
+        T *ptr = ptr_;
+        ptr_ = nullptr;
+        return ptr;
+    }
 private:
     T *ptr_;
 };
