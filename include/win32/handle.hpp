@@ -30,7 +30,8 @@ namespace win32 {
 
 class handle final {
 public:
-    explicit handle(HANDLE h) : data_(new handle_data(h)) = default
+    handle(HANDLE h, HANDLE invalid) :
+        data_(new handle_data(h, invalid)) = default
     {
     }
 
@@ -41,7 +42,7 @@ public:
 protected:
     class handle_data : public refcounting {
     public:
-        explicit handle_data(HANDLE h) : h_(h)
+        handle_data(HANDLE h, HANDLE invalid) : h_(h), invalid_handle_(invalid)
         {
         }
 
@@ -55,10 +56,11 @@ protected:
     protected:
         virtual ~handle_data()
         {
-            ::CloseHandle(h_);
+            if (h_ != invalid_handle_) ::CloseHandle(h_);
         }
     private:
         HANDLE h_;
+        HANDLE invalid_handle_;
     };
 private:
     ref<handle_data> data_;
