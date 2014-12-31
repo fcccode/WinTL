@@ -81,7 +81,7 @@ public:
     }
 
     template<class Y>
-    ref& operator=(const ref<Y>& that)
+    ref<T>& operator=(const ref<Y>& that)
     {
         if (ptr_) ptr_->decref();
         ptr_ = that.ptr_;
