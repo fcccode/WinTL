@@ -48,6 +48,13 @@ enum class file_access_rights : access_mask {
     all                         = FILE_ALL_ACCESS
 };
 
+enum class file_share_modes : DWORD {
+    none        = 0,
+    read_data   = FILE_SHARE_READ,
+    write_data  = FILE_SHARE_WRITE,
+    delete_file = FILE_SHARE_DELETE
+};
+
 } // namespace win32
 
 #endif // WIN32_FILE_HPP_INCLUDED
