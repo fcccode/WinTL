@@ -22,15 +22,11 @@
 #ifndef WIN32_RIGHTS_HPP_INCLUDED
 #define WIN32_RIGHTS_HPP_INCLUDED
 
-#include <cstdint>
-
 #include <windows.h>
 
 namespace win32 {
 
-using namespace std;
-
-typedef uint32_t access_mask;
+typedef DWORD access_mask;
 
 enum class common_access_rights : access_mask {
     delete_object       = DELETE,
