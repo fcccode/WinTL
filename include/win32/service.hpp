@@ -26,6 +26,7 @@
 #include <system_error>
 #include <functional>
 #include <string>
+#include <utility>
 
 #include <cinttypes>
 #include <cstring>
@@ -78,11 +79,36 @@ public:
                 SERVICE_MAIN_TRUNK_PROC_OFFSET)[0] = svcmain.addr;
     }
 
+    service(service&& src) : name_(std::move(src.name_)),
+            proc_(std::move(src.proc_)), proctrunk_(src.proctrunk_)
+    {
+        src.proctrunk_ = nullptr;
+        reinterpret_cast<std::intptr_t *>(proctrunk_ +
+                SERVICE_MAIN_TRUNK_THIS_OFFSET)[0] =
+                reinterpret_cast<std::intptr_t>(this);
+    }
+
     service(const service&) = delete;
 
     ~service()
     {
         if (proctrunk_) ::VirtualFree(proctrunk_, 0, MEM_RELEASE);
+    }
+
+    service& operator=(service&& src)
+    {
+        if (proctrunk_) ::VirtualFree(proctrunk_, 0, MEM_RELEASE);
+
+        name_ = std::move(src.name_);
+        proc_ = std::move(src.proc_);
+        proctrunk_ = src.proctrunk_;
+        src.proctrunk_ = nullptr;
+
+        reinterpret_cast<std::intptr_t *>(proctrunk_ +
+                SERVICE_MAIN_TRUNK_THIS_OFFSET)[0] =
+                reinterpret_cast<std::intptr_t>(this);
+
+        return *this;
     }
 
     service& operator=(const service&) = delete;
