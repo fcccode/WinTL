@@ -35,6 +35,76 @@
 
 namespace win32 {
 
+class service_controller final {
+public:
+    service_controller(SERVICE_STATUS_HANDLE handle) : handle_(handle)
+    {
+    }
+private:
+    SERVICE_STATUS_HANDLE handle_;
+};
+
+class service_control_handler {
+public:
+    virtual ~service_control_handler()
+    {
+    }
+
+    virtual unsigned long process_service_control(service_controller ctl,
+            unsigned long ctlcode, unsigned long evtype, void *evdata) = 0;
+protected:
+    service_control_handler()
+    {
+    }
+};
+
+template<class Handler>
+struct _service_control_invoker_context {
+    SERVICE_STATUS_HANDLE status_handle;
+    Handler handler;
+
+    _service_control_invoker_context(const Handler& h) : handler(h)
+    {
+    }
+};
+
+template<class Handler>
+inline DWORD WINAPI _service_control_invoker(
+        DWORD dwControl,
+        DWORD dwEventType,
+        LPVOID lpEventData,
+        LPVOID lpContext)
+{
+    auto context = reinterpret_cast<_service_control_invoker_context<Handler> *>
+            (lpContext);
+
+    auto result = context->handler.process_service_control(
+            context->status_handle, dwControl, dwEventType, lpEventData);
+
+    if (dwControl == SERVICE_CONTROL_STOP) delete context;
+
+    return result;
+}
+
+template<class Handler>
+inline service_controller register_service_control_handler(
+        const std::wstring& svc,
+        const Handler& handler)
+{
+    auto context = new _service_control_invoker_context(handler);
+
+    context->status_handle = ::RegisterServiceCtrlHandlerExW(svc.c_str(),
+            _service_control_invoker<Handler>, context);
+
+    if (!context->status_handle) {
+        auto error = ::GetLastError();
+        delete context;
+        throw std::system_error(error, std::system_category());
+    }
+
+    return context->status_handle;
+}
+
 #ifdef _M_AMD64
 static const std::uint8_t service_main_trunk[] = {
     0x48, 0x83, 0xEC, 0x18, 0x4C, 0x8B, 0xC2, 0x8B,
