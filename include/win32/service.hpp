@@ -58,6 +58,40 @@ protected:
     }
 };
 
+class service_control_events_handler final : public service_control_handler {
+public:
+    service_control_events_handler()
+    {
+    }
+
+    virtual unsigned long process_service_control(service_controller ctl,
+            unsigned long ctlcode, unsigned long evtype, void *evdata) override
+    {
+        switch (ctlcode) {
+        case SERVICE_CONTROL_STOP:
+            if (stop_handler_) {
+                stop_handler_(ctl);
+                return NO_ERROR;
+            }
+            break;
+        }
+
+        return ERROR_CALL_NOT_IMPLEMENTED;
+    }
+
+    const std::function<void(service_controller)>& stop_handler() const
+    {
+        return stop_handler_;
+    }
+
+    void stop_handler(const std::function<void(service_controller)>& h)
+    {
+        stop_handler_ = h;
+    }
+private:
+    std::function<void(service_controller)> stop_handler_;
+};
+
 class service_control_handler_function final : public service_control_handler {
 public:
     service_control_handler_function(const std::function<unsigned long(
