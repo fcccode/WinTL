@@ -103,7 +103,7 @@ public:
     virtual unsigned long process_service_control(service_controller ctl,
             unsigned long ctlcode, unsigned long evtype, void *evdata) override
     {
-        handler_(ctl, ctlcode, evtype, evdata);
+        return handler_(ctl, ctlcode, evtype, evdata);
     }
 private:
     std::function<unsigned long(service_controller, unsigned long,
