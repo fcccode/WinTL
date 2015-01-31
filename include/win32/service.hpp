@@ -49,9 +49,11 @@ class service_controller final {
 public:
     service_controller(SERVICE_STATUS_HANDLE handle) : handle_(handle)
     {
+        std::memset(&ctldata_, 0, sizeof(ctldata_));
     }
 private:
     SERVICE_STATUS_HANDLE handle_;
+    SERVICE_STATUS ctldata_;
 };
 
 class service_control_handler {
