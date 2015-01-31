@@ -58,6 +58,24 @@ protected:
     }
 };
 
+class service_control_handler_function final : public service_control_handler {
+public:
+    service_control_handler_function(const std::function<unsigned long(
+            service_controller, unsigned long, unsigned long, void *)>& h) :
+            handler_(h)
+    {
+    }
+
+    virtual unsigned long process_service_control(service_controller ctl,
+            unsigned long ctlcode, unsigned long evtype, void *evdata) override
+    {
+        handler_(ctl, ctlcode, evtype, evdata);
+    }
+private:
+    std::function<unsigned long(service_controller, unsigned long,
+            unsigned long, void *)> handler_;
+};
+
 template<class Handler>
 struct _service_control_invoker_context {
     SERVICE_STATUS_HANDLE status_handle;
