@@ -35,6 +35,16 @@
 
 namespace win32 {
 
+enum class service_status : unsigned long {
+    stopped             = SERVICE_STOPPED,          // 1
+    start_pending       = SERVICE_START_PENDING,    // 2
+    stop_pending        = SERVICE_STOP_PENDING,     // 3
+    running             = SERVICE_RUNNING,          // 4
+    continue_pending    = SERVICE_CONTINUE_PENDING, // 5
+    pause_pending       = SERVICE_PAUSE_PENDING,    // 6
+    paused              = SERVICE_PAUSED            // 7
+};
+
 class service_controller final {
 public:
     service_controller(SERVICE_STATUS_HANDLE handle) : handle_(handle)
