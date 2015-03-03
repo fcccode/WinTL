@@ -45,7 +45,7 @@ public:
         return refcnt_.fetch_add(1) + 1;
     }
 protected:
-    refcounting(unsigned long initial = 1) : refcnt_(initial) = default
+    refcounting(unsigned long initial = 1) : refcnt_(ATOMIC_VAR_INIT(initial))
     {
     }
 
