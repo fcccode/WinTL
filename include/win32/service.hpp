@@ -27,6 +27,7 @@
 #include <functional>
 #include <string>
 #include <utility>
+#include <memory>
 
 #include <cinttypes>
 #include <cstring>
@@ -45,128 +46,259 @@ enum class service_status : unsigned long {
     paused              = SERVICE_PAUSED            // 7
 };
 
-class service_controller final {
+enum class service_type : unsigned long {
+    kernel_driver       = SERVICE_KERNEL_DRIVER,        // 0x001
+    file_system_driver  = SERVICE_FILE_SYSTEM_DRIVER,   // 0x002
+    win32_own_process   = SERVICE_WIN32_OWN_PROCESS,    // 0x010
+    win32_share_process = SERVICE_WIN32_SHARE_PROCESS,  // 0x020
+    interactive_process = SERVICE_INTERACTIVE_PROCESS,  // 0x100
+};
+
+enum class service_controls_accept : unsigned long {
+    stop                    = SERVICE_ACCEPT_STOP,                      // 0x001
+    pause_continue          = SERVICE_ACCEPT_PAUSE_CONTINUE,            // 0x002
+    shutdown                = SERVICE_ACCEPT_SHUTDOWN,                  // 0x004
+    paramchange             = SERVICE_ACCEPT_PARAMCHANGE,               // 0x008
+    netbindchange           = SERVICE_ACCEPT_NETBINDCHANGE,             // 0x010
+    hardwareprofilechange   = SERVICE_ACCEPT_HARDWAREPROFILECHANGE,     // 0x020
+    powerevent              = SERVICE_ACCEPT_POWEREVENT,                // 0x040
+    sessionchange           = SERVICE_ACCEPT_SESSIONCHANGE,             // 0x080
+    preshutdown             = SERVICE_ACCEPT_PRESHUTDOWN,               // 0x100
+    timechange              = SERVICE_ACCEPT_TIMECHANGE,                // 0x200
+    triggerevent            = SERVICE_ACCEPT_TRIGGEREVENT,              // 0x400
+};
+
+inline service_controls_accept operator | (
+        service_controls_accept lhs,
+        service_controls_accept rhs)
+{
+    return lhs | rhs;
+}
+
+class service_controller;
+
+typedef std::function<unsigned long(
+        const std::shared_ptr<service_controller>&,
+        unsigned long,
+        unsigned long,
+        void *)> service_control_handler;
+
+class service_control_handler_context final {
 public:
-    service_controller(SERVICE_STATUS_HANDLE handle) : handle_(handle)
+    service_control_handler_context(const service_control_handler& h) : h_(h)
     {
-        std::memset(&ctldata_, 0, sizeof(ctldata_));
+    }
+
+    const service_control_handler& handler() const
+    {
+        return h_;
+    }
+
+    void service_controller(
+            const std::shared_ptr<win32::service_controller>& ctl)
+    {
+        ctl_ = ctl;
+    }
+
+    const std::shared_ptr<win32::service_controller>& service_controller() const
+    {
+        return ctl_;
     }
 private:
-    SERVICE_STATUS_HANDLE handle_;
-    SERVICE_STATUS ctldata_;
+    service_control_handler h_;
+    std::shared_ptr<win32::service_controller> ctl_;
 };
 
-class service_control_handler {
+class service_controller final :
+        public std::enable_shared_from_this<service_controller> {
 public:
-    virtual ~service_control_handler()
+    service_controller(
+            SERVICE_STATUS_HANDLE sth,
+            service_type svctype,
+            service_controls_accept ctls,
+            unsigned long inittime,
+            service_control_handler_context *hctx) :
+                    sth_(sth),
+                    hctx_(hctx),
+                    ctls_(ctls)
     {
+        std::memset(&st_, 0, sizeof(st_));
+        st_.dwServiceType = static_cast<DWORD>(svctype);
+        st_.dwCurrentState = static_cast<DWORD>(service_status::start_pending);
+        st_.dwCheckPoint = 1;
+        st_.dwWaitHint = inittime;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
     }
 
-    virtual unsigned long process_service_control(service_controller ctl,
-            unsigned long ctlcode, unsigned long evtype, void *evdata) = 0;
-protected:
-    service_control_handler()
-    {
-    }
-};
+    service_controller(const service_controller&) = delete;
 
-class service_control_events_handler final : public service_control_handler {
-public:
-    service_control_events_handler()
+    ~service_controller()
     {
+        delete hctx_;
     }
 
-    virtual unsigned long process_service_control(service_controller ctl,
-            unsigned long ctlcode, unsigned long evtype, void *evdata) override
+    service_controller& operator = (const service_controller&) = delete;
+
+    void begin_continue(unsigned long t)
     {
-        switch (ctlcode) {
-        case SERVICE_CONTROL_STOP:
-            if (stop_handler_) {
-                stop_handler_(ctl);
-                return NO_ERROR;
-            }
-            break;
+        st_.dwCurrentState = static_cast<DWORD>(
+                service_status::continue_pending);
+        st_.dwCheckPoint = 1;
+        st_.dwWaitHint = t;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void begin_pause(unsigned long t)
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::pause_pending);
+        st_.dwCheckPoint = 1;
+        st_.dwWaitHint = t;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void begin_stop(unsigned long t)
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::stop_pending);
+        st_.dwCheckPoint = 1;
+        st_.dwWaitHint = t;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void continued()
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::running);
+        st_.dwCheckPoint = 0;
+        st_.dwWaitHint = 0;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void finish_init()
+    {
+        hctx_->service_controller(shared_from_this());
+
+        st_.dwCurrentState = static_cast<DWORD>(service_status::running);
+        st_.dwControlsAccepted = static_cast<DWORD>(
+                service_controls_accept::stop | ctls_);
+        st_.dwCheckPoint = 0;
+        st_.dwWaitHint = 0;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            auto e = GetLastError();
+            hctx_->service_controller(nullptr);
+            throw std::system_error(e, std::system_category());
+        }
+    }
+
+    void increase_pending_progress()
+    {
+        st_.dwCheckPoint++;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void paused()
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::paused);
+        st_.dwCheckPoint = 0;
+        st_.dwWaitHint = 0;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void stopped(unsigned long e = NO_ERROR, bool custom_err = false)
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::stopped);
+        st_.dwCheckPoint = 0;
+        st_.dwWaitHint = 0;
+
+        if (custom_err) {
+            st_.dwWin32ExitCode = ERROR_SERVICE_SPECIFIC_ERROR;
+            st_.dwServiceSpecificExitCode = e;
+        } else {
+            st_.dwWin32ExitCode = e;
+            st_.dwServiceSpecificExitCode = 0;
         }
 
-        return ERROR_CALL_NOT_IMPLEMENTED;
-    }
-
-    const std::function<void(service_controller)>& stop_handler() const
-    {
-        return stop_handler_;
-    }
-
-    void stop_handler(const std::function<void(service_controller)>& h)
-    {
-        stop_handler_ = h;
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
     }
 private:
-    std::function<void(service_controller)> stop_handler_;
+    service_control_handler_context *hctx_;
+    service_controls_accept ctls_;
+    SERVICE_STATUS_HANDLE sth_;
+    SERVICE_STATUS st_;
 };
 
-class service_control_handler_function final : public service_control_handler {
-public:
-    service_control_handler_function(const std::function<unsigned long(
-            service_controller, unsigned long, unsigned long, void *)>& h) :
-            handler_(h)
-    {
-    }
-
-    virtual unsigned long process_service_control(service_controller ctl,
-            unsigned long ctlcode, unsigned long evtype, void *evdata) override
-    {
-        return handler_(ctl, ctlcode, evtype, evdata);
-    }
-private:
-    std::function<unsigned long(service_controller, unsigned long,
-            unsigned long, void *)> handler_;
-};
-
-template<class Handler>
-struct _service_control_invoker_context {
-    SERVICE_STATUS_HANDLE status_handle;
-    Handler handler;
-
-    _service_control_invoker_context(const Handler& h) : handler(h)
-    {
-    }
-};
-
-template<class Handler>
-inline DWORD WINAPI _service_control_invoker(
-        DWORD dwControl,
-        DWORD dwEventType,
-        LPVOID lpEventData,
-        LPVOID lpContext)
+inline DWORD WINAPI service_control_handler_trunk(
+        DWORD ctl,
+        DWORD evt,
+        LPVOID evt_data,
+        LPVOID ctx)
 {
-    auto context = reinterpret_cast<_service_control_invoker_context<Handler> *>
-            (lpContext);
+    auto hctx = reinterpret_cast<service_control_handler_context *>(ctx);
+    auto result = hctx->handler()(
+            hctx->service_controller(),
+            ctl,
+            evt,
+            evt_data);
 
-    auto result = context->handler.process_service_control(
-            context->status_handle, dwControl, dwEventType, lpEventData);
-
-    if (dwControl == SERVICE_CONTROL_STOP) delete context;
+    if (ctl == SERVICE_CONTROL_STOP) {
+        hctx->service_controller(nullptr);
+    }
 
     return result;
 }
 
-template<class Handler>
-inline service_controller register_service_control_handler(
-        const std::wstring& svc,
-        const Handler& handler)
+inline std::shared_ptr<service_controller> register_service_control_handler(
+        const std::wstring& svcname,
+        service_type svctype,
+        service_controls_accept svcctls,
+        unsigned long inittime,
+        const service_control_handler& h)
 {
-    auto context = new _service_control_invoker_context(handler);
+    auto ctx = new service_control_handler_context(h);
+    auto sth = ::RegisterServiceCtrlHandlerExW(
+            svcname.c_str(),
+            service_control_handler_trunk,
+            ctx);
 
-    context->status_handle = ::RegisterServiceCtrlHandlerExW(svc.c_str(),
-            _service_control_invoker<Handler>, context);
-
-    if (!context->status_handle) {
-        auto error = ::GetLastError();
-        delete context;
-        throw std::system_error(error, std::system_category());
+    if (!sth) {
+        auto e = ::GetLastError();
+        delete ctx;
+        throw std::system_error(e, std::system_category());
     }
 
-    return context->status_handle;
+    try {
+        return std::make_shared<service_controller>(
+                sth,
+                svctype,
+                svcctls,
+                inittime,
+                ctx);
+    } catch (...) {
+        delete ctx;
+        throw;
+    }
 }
 
 #ifdef _M_AMD64
