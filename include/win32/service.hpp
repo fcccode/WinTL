@@ -258,11 +258,20 @@ inline DWORD WINAPI service_control_handler_trunk(
         LPVOID ctx)
 {
     auto hctx = reinterpret_cast<service_control_handler_context *>(ctx);
-    auto result = hctx->handler()(
-            hctx->service_controller(),
-            ctl,
-            evt,
-            evt_data);
+    unsigned long result;
+
+    try {
+        result = hctx->handler()(
+                hctx->service_controller(),
+                ctl,
+                evt,
+                evt_data);
+    } catch (...) {
+        if (ctl == SERVICE_CONTROL_STOP) {
+            hctx->service_controller(nullptr);
+        }
+        throw;
+    }
 
     if (ctl == SERVICE_CONTROL_STOP) {
         hctx->service_controller(nullptr);
