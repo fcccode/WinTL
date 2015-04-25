@@ -72,7 +72,8 @@ inline service_controls_accept operator | (
         service_controls_accept lhs,
         service_controls_accept rhs)
 {
-    return lhs | rhs;
+    return static_cast<service_controls_accept>(
+            static_cast<unsigned long>(lhs) | static_cast<unsigned long>(rhs));
 }
 
 class service;
