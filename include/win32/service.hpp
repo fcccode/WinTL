@@ -75,6 +75,7 @@ inline service_controls_accept operator | (
     return lhs | rhs;
 }
 
+class service;
 class service_controller;
 
 typedef std::function<unsigned long(
@@ -316,11 +317,13 @@ static const std::uint8_t service_main_trunk[] = {
 #error target platform is not supported.
 #endif
 
+typedef std::function<void(const service&, int, wchar_t **)> service_procedure;
+
 class service final {
 public:
     service(
             const std::wstring& name,
-            const std::function<void(int, wchar_t **)>& proc) :
+            const service_procedure& proc) :
                     name_(name),
                     proc_(proc)
     {
@@ -400,12 +403,12 @@ public:
     }
 private:
     std::wstring name_;
-    std::function<void(int, wchar_t **)> proc_;
+    service_procedure proc_;
     std::uint8_t *proctrunk_;
 
     void service_boot(DWORD argc, LPWSTR *argv)
     {
-        proc_(argc, argv);
+        proc_(*this, argc, argv);
     }
 };
 
