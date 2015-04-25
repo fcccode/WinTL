@@ -313,6 +313,16 @@ inline std::shared_ptr<service_controller> register_service_control_handler(
 }
 
 #ifdef _M_AMD64
+/*
+    sub rsp, 24
+    mov r8, rdx
+    mov edx, ecx
+    mov rcx, 0FFFFFFFFFFFFFFFFh ; this
+    mov rax, 0FFFFFFFFFFFFFFFFh ; proc
+    call rax
+    add rsp, 24
+    ret
+ */
 static const std::uint8_t service_main_trunk[] = {
     0x48, 0x83, 0xEC, 0x18, 0x4C, 0x8B, 0xC2, 0x8B,
     0xD1, 0x48, 0xB9, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
