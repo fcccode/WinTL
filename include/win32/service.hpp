@@ -271,7 +271,6 @@ public:
     service_controller(
             const win32::service& svc,
             SERVICE_STATUS_HANDLE sth,
-            service_type svctype,
             service_controls_accept ctls,
             unsigned long inittime,
             service_control_handler_context *hctx) :
@@ -281,7 +280,7 @@ public:
                     ctls_(ctls)
     {
         std::memset(&st_, 0, sizeof(st_));
-        st_.dwServiceType = static_cast<DWORD>(svctype);
+        st_.dwServiceType = static_cast<DWORD>(svc_.type());
         st_.dwCurrentState = static_cast<DWORD>(service_status::start_pending);
         st_.dwCheckPoint = 1;
         st_.dwWaitHint = inittime;
@@ -444,7 +443,6 @@ inline DWORD WINAPI service_control_handler_trunk(
 
 inline std::shared_ptr<service_controller> register_service_control_handler(
         const service& svc,
-        service_type svctype,
         service_controls_accept svcctls,
         unsigned long inittime,
         const service_control_handler& h)
@@ -465,7 +463,6 @@ inline std::shared_ptr<service_controller> register_service_control_handler(
         return std::make_shared<service_controller>(
                 svc,
                 sth,
-                svctype,
                 svcctls,
                 inittime,
                 ctx);
