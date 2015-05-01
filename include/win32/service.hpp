@@ -142,8 +142,10 @@ class service final {
 public:
     service(
             const std::wstring& name,
+            service_type type,
             const service_procedure& proc) :
                     name_(name),
+                    type_(type),
                     proc_(proc)
     {
         proctrunk_ = reinterpret_cast<std::uint8_t *>(VirtualAlloc(
@@ -220,8 +222,14 @@ public:
     {
         return name_;
     }
+
+    service_type type() const
+    {
+        return type_;
+    }
 private:
     std::wstring name_;
+    service_type type_;
     service_procedure proc_;
     std::uint8_t *proctrunk_;
 
