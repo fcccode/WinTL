@@ -111,207 +111,6 @@ private:
     std::shared_ptr<win32::service_controller> ctl_;
 };
 
-class service_controller final :
-        public std::enable_shared_from_this<service_controller> {
-public:
-    service_controller(
-            SERVICE_STATUS_HANDLE sth,
-            service_type svctype,
-            service_controls_accept ctls,
-            unsigned long inittime,
-            service_control_handler_context *hctx) :
-                    sth_(sth),
-                    hctx_(hctx),
-                    ctls_(ctls)
-    {
-        std::memset(&st_, 0, sizeof(st_));
-        st_.dwServiceType = static_cast<DWORD>(svctype);
-        st_.dwCurrentState = static_cast<DWORD>(service_status::start_pending);
-        st_.dwCheckPoint = 1;
-        st_.dwWaitHint = inittime;
-
-        if (!SetServiceStatus(sth_, &st_)) {
-            throw std::system_error(GetLastError(), std::system_category());
-        }
-    }
-
-    service_controller(const service_controller&) = delete;
-
-    ~service_controller()
-    {
-        delete hctx_;
-    }
-
-    service_controller& operator = (const service_controller&) = delete;
-
-    void begin_continue(unsigned long t)
-    {
-        st_.dwCurrentState = static_cast<DWORD>(
-                service_status::continue_pending);
-        st_.dwCheckPoint = 1;
-        st_.dwWaitHint = t;
-
-        if (!SetServiceStatus(sth_, &st_)) {
-            throw std::system_error(GetLastError(), std::system_category());
-        }
-    }
-
-    void begin_pause(unsigned long t)
-    {
-        st_.dwCurrentState = static_cast<DWORD>(service_status::pause_pending);
-        st_.dwCheckPoint = 1;
-        st_.dwWaitHint = t;
-
-        if (!SetServiceStatus(sth_, &st_)) {
-            throw std::system_error(GetLastError(), std::system_category());
-        }
-    }
-
-    void begin_stop(unsigned long t)
-    {
-        st_.dwCurrentState = static_cast<DWORD>(service_status::stop_pending);
-        st_.dwCheckPoint = 1;
-        st_.dwWaitHint = t;
-
-        if (!SetServiceStatus(sth_, &st_)) {
-            throw std::system_error(GetLastError(), std::system_category());
-        }
-    }
-
-    void continued()
-    {
-        st_.dwCurrentState = static_cast<DWORD>(service_status::running);
-        st_.dwCheckPoint = 0;
-        st_.dwWaitHint = 0;
-
-        if (!SetServiceStatus(sth_, &st_)) {
-            throw std::system_error(GetLastError(), std::system_category());
-        }
-    }
-
-    void finish_init()
-    {
-        hctx_->service_controller(shared_from_this());
-
-        st_.dwCurrentState = static_cast<DWORD>(service_status::running);
-        st_.dwControlsAccepted = static_cast<DWORD>(
-                service_controls_accept::stop | ctls_);
-        st_.dwCheckPoint = 0;
-        st_.dwWaitHint = 0;
-
-        if (!SetServiceStatus(sth_, &st_)) {
-            auto e = GetLastError();
-            hctx_->service_controller(nullptr);
-            throw std::system_error(e, std::system_category());
-        }
-    }
-
-    void increase_pending_progress()
-    {
-        st_.dwCheckPoint++;
-
-        if (!SetServiceStatus(sth_, &st_)) {
-            throw std::system_error(GetLastError(), std::system_category());
-        }
-    }
-
-    void paused()
-    {
-        st_.dwCurrentState = static_cast<DWORD>(service_status::paused);
-        st_.dwCheckPoint = 0;
-        st_.dwWaitHint = 0;
-
-        if (!SetServiceStatus(sth_, &st_)) {
-            throw std::system_error(GetLastError(), std::system_category());
-        }
-    }
-
-    void stopped(unsigned long e = NO_ERROR, bool custom_err = false)
-    {
-        st_.dwCurrentState = static_cast<DWORD>(service_status::stopped);
-        st_.dwCheckPoint = 0;
-        st_.dwWaitHint = 0;
-
-        if (custom_err) {
-            st_.dwWin32ExitCode = ERROR_SERVICE_SPECIFIC_ERROR;
-            st_.dwServiceSpecificExitCode = e;
-        } else {
-            st_.dwWin32ExitCode = e;
-            st_.dwServiceSpecificExitCode = 0;
-        }
-
-        if (!SetServiceStatus(sth_, &st_)) {
-            throw std::system_error(GetLastError(), std::system_category());
-        }
-    }
-private:
-    service_control_handler_context *hctx_;
-    service_controls_accept ctls_;
-    SERVICE_STATUS_HANDLE sth_;
-    SERVICE_STATUS st_;
-};
-
-inline DWORD WINAPI service_control_handler_trunk(
-        DWORD ctl,
-        DWORD evt,
-        LPVOID evt_data,
-        LPVOID ctx)
-{
-    auto hctx = reinterpret_cast<service_control_handler_context *>(ctx);
-    unsigned long result;
-
-    try {
-        result = hctx->handler()(
-                hctx->service_controller(),
-                ctl,
-                evt,
-                evt_data);
-    } catch (...) {
-        if (ctl == SERVICE_CONTROL_STOP) {
-            hctx->service_controller(nullptr);
-        }
-        throw;
-    }
-
-    if (ctl == SERVICE_CONTROL_STOP) {
-        hctx->service_controller(nullptr);
-    }
-
-    return result;
-}
-
-inline std::shared_ptr<service_controller> register_service_control_handler(
-        const std::wstring& svcname,
-        service_type svctype,
-        service_controls_accept svcctls,
-        unsigned long inittime,
-        const service_control_handler& h)
-{
-    auto ctx = new service_control_handler_context(h);
-    auto sth = ::RegisterServiceCtrlHandlerExW(
-            svcname.c_str(),
-            service_control_handler_trunk,
-            ctx);
-
-    if (!sth) {
-        auto e = ::GetLastError();
-        delete ctx;
-        throw std::system_error(e, std::system_category());
-    }
-
-    try {
-        return std::make_shared<service_controller>(
-                sth,
-                svctype,
-                svcctls,
-                inittime,
-                ctx);
-    } catch (...) {
-        delete ctx;
-        throw;
-    }
-}
-
 #ifdef _M_AMD64
 /*
     sub rsp, 24
@@ -455,6 +254,216 @@ inline void service_control_dispatcher(InputIt first, InputIt last)
     if (!StartServiceCtrlDispatcherW(table.data())) {
         auto err = GetLastError();
         throw std::system_error(err, std::system_category());
+    }
+}
+
+class service_controller final :
+        public std::enable_shared_from_this<service_controller> {
+public:
+    service_controller(
+            const win32::service& svc,
+            SERVICE_STATUS_HANDLE sth,
+            service_type svctype,
+            service_controls_accept ctls,
+            unsigned long inittime,
+            service_control_handler_context *hctx) :
+                    svc_(svc),
+                    sth_(sth),
+                    hctx_(hctx),
+                    ctls_(ctls)
+    {
+        std::memset(&st_, 0, sizeof(st_));
+        st_.dwServiceType = static_cast<DWORD>(svctype);
+        st_.dwCurrentState = static_cast<DWORD>(service_status::start_pending);
+        st_.dwCheckPoint = 1;
+        st_.dwWaitHint = inittime;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    service_controller(const service_controller&) = delete;
+
+    ~service_controller()
+    {
+        delete hctx_;
+    }
+
+    service_controller& operator = (const service_controller&) = delete;
+
+    void begin_continue(unsigned long t)
+    {
+        st_.dwCurrentState = static_cast<DWORD>(
+                service_status::continue_pending);
+        st_.dwCheckPoint = 1;
+        st_.dwWaitHint = t;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void begin_pause(unsigned long t)
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::pause_pending);
+        st_.dwCheckPoint = 1;
+        st_.dwWaitHint = t;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void begin_stop(unsigned long t)
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::stop_pending);
+        st_.dwCheckPoint = 1;
+        st_.dwWaitHint = t;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void continued()
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::running);
+        st_.dwCheckPoint = 0;
+        st_.dwWaitHint = 0;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void finish_init()
+    {
+        hctx_->service_controller(shared_from_this());
+
+        st_.dwCurrentState = static_cast<DWORD>(service_status::running);
+        st_.dwControlsAccepted = static_cast<DWORD>(
+                service_controls_accept::stop | ctls_);
+        st_.dwCheckPoint = 0;
+        st_.dwWaitHint = 0;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            auto e = GetLastError();
+            hctx_->service_controller(nullptr);
+            throw std::system_error(e, std::system_category());
+        }
+    }
+
+    void increase_pending_progress()
+    {
+        st_.dwCheckPoint++;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    void paused()
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::paused);
+        st_.dwCheckPoint = 0;
+        st_.dwWaitHint = 0;
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+
+    const win32::service& service() const
+    {
+        return svc_;
+    }
+
+    void stopped(unsigned long e = NO_ERROR, bool custom_err = false)
+    {
+        st_.dwCurrentState = static_cast<DWORD>(service_status::stopped);
+        st_.dwCheckPoint = 0;
+        st_.dwWaitHint = 0;
+
+        if (custom_err) {
+            st_.dwWin32ExitCode = ERROR_SERVICE_SPECIFIC_ERROR;
+            st_.dwServiceSpecificExitCode = e;
+        } else {
+            st_.dwWin32ExitCode = e;
+            st_.dwServiceSpecificExitCode = 0;
+        }
+
+        if (!SetServiceStatus(sth_, &st_)) {
+            throw std::system_error(GetLastError(), std::system_category());
+        }
+    }
+private:
+    const win32::service& svc_;
+    service_control_handler_context *hctx_;
+    service_controls_accept ctls_;
+    SERVICE_STATUS_HANDLE sth_;
+    SERVICE_STATUS st_;
+};
+
+inline DWORD WINAPI service_control_handler_trunk(
+        DWORD ctl,
+        DWORD evt,
+        LPVOID evt_data,
+        LPVOID ctx)
+{
+    auto hctx = reinterpret_cast<service_control_handler_context *>(ctx);
+    unsigned long result;
+
+    try {
+        result = hctx->handler()(
+                hctx->service_controller(),
+                ctl,
+                evt,
+                evt_data);
+    } catch (...) {
+        if (ctl == SERVICE_CONTROL_STOP) {
+            hctx->service_controller(nullptr);
+        }
+        throw;
+    }
+
+    if (ctl == SERVICE_CONTROL_STOP) {
+        hctx->service_controller(nullptr);
+    }
+
+    return result;
+}
+
+inline std::shared_ptr<service_controller> register_service_control_handler(
+        const service& svc,
+        service_type svctype,
+        service_controls_accept svcctls,
+        unsigned long inittime,
+        const service_control_handler& h)
+{
+    auto ctx = new service_control_handler_context(h);
+    auto sth = ::RegisterServiceCtrlHandlerExW(
+            svc.name().c_str(),
+            service_control_handler_trunk,
+            ctx);
+
+    if (!sth) {
+        auto e = ::GetLastError();
+        delete ctx;
+        throw std::system_error(e, std::system_category());
+    }
+
+    try {
+        return std::make_shared<service_controller>(
+                svc,
+                sth,
+                svctype,
+                svcctls,
+                inittime,
+                ctx);
+    } catch (...) {
+        delete ctx;
+        throw;
     }
 }
 
