@@ -78,11 +78,14 @@ public:
                 enable_cb_(enable_cb),
                 m_(mode::disable)
     {
-        auto res = EventRegister(
-                id_,
-                enable_cb_ ? on_enable_trunk : nullptr,
-                this,
-                &h_);
+        ULONG res;
+
+        if (enable_cb_) {
+            res = EventRegister(id_, on_enable_trunk, this, &h_);
+        } else {
+            res = EventRegister(id_, nullptr, nullptr, &h_);
+        }
+
         if (res != ERROR_SUCCESS) {
             throw std::system_error(res, std::system_category());
         }
