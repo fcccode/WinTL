@@ -22,6 +22,11 @@
 #ifndef WIN32_COM_HPP_INCLUDED
 #define WIN32_COM_HPP_INCLUDED
 
+#include <system_error>
+
+#include <windows.h>
+#include <objbase.h>
+
 namespace win32 {
 
 enum class com_threading_model {
@@ -29,6 +34,36 @@ enum class com_threading_model {
     free,
     both,
     neutral
+};
+
+class com_context final {
+public:
+    enum class flags : DWORD {
+        multi_threaded      = COINIT_MULTITHREADED,     // 0x00
+        apartment_threaded  = COINIT_APARTMENTTHREADED, // 0x02
+        disable_ole1dde     = COINIT_DISABLE_OLE1DDE,   // 0x04
+        speed_over_memory   = COINIT_SPEED_OVER_MEMORY, // 0x08
+    };
+
+    com_context(flags f)
+    {
+        auto r = CoInitializeEx(nullptr, static_cast<DWORD>(f));
+        if (FAILED(r)) {
+            throw std::system_error(
+                    r,
+                    std::system_category(),
+                    "CoInitializeEx() failed");
+        }
+    }
+
+    com_context(const com_context&) = delete;
+
+    ~com_context()
+    {
+        CoUninitialize();
+    }
+
+    com_context& operator = (const com_context&) = delete;
 };
 
 } // namespace win32
