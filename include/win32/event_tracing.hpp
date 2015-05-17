@@ -26,15 +26,82 @@
 
 #include <functional>
 #include <system_error>
+#include <stdexcept>
+#include <string>
+#include <initializer_list>
+#include <limits>
 
+#include <cstring>
 #include <cinttypes>
+#include <cstddef>
 
 #include <windows.h>
 
 #include <evntrace.h>
 #include <evntprov.h>
 
+#include <malloc.h>
+
 namespace win32 {
+
+class manifest_event_data final {
+public:
+    manifest_event_data(const char *s)
+    {
+        auto len = std::strlen(s) + 1;
+
+#pragma push_macro("max")
+#undef max
+        if (len > std::numeric_limits<std::uint32_t>::max()) {
+            throw std::length_error("Length of string is out of limit.");
+        }
+#pragma pop_macro("max")
+
+        addr_ = s;
+        len_ = static_cast<std::uint32_t>(len);
+    }
+
+    manifest_event_data(const std::string& s) : manifest_event_data(s.c_str())
+    {
+    }
+
+    manifest_event_data(const wchar_t *s)
+    {
+        auto len = (std::wcslen(s) + 1) * sizeof(wchar_t);
+
+#pragma push_macro("max")
+#undef max
+        if (len > std::numeric_limits<std::uint32_t>::max()) {
+            throw std::length_error("Length of string is out of limit.");
+        }
+#pragma pop_macro("max")
+
+        addr_ = s;
+        len_ = static_cast<std::uint32_t>(len);
+    }
+
+    manifest_event_data(const std::wstring& s) : manifest_event_data(s.c_str())
+    {
+    }
+
+    template<typename T>
+    manifest_event_data(const T& f) : addr_(&f), len_(sizeof(f))
+    {
+    }
+
+    const void * address() const
+    {
+        return addr_;
+    }
+
+    std::uint32_t length() const
+    {
+        return len_;
+    }
+private:
+    const void *addr_;
+    std::uint32_t len_;
+};
 
 class manifest_event_provider final {
 public:
@@ -103,6 +170,42 @@ public:
 
     manifest_event_provider& operator = (
             const manifest_event_provider&) = delete;
+
+    void write(const EVENT_DESCRIPTOR& evt)
+    {
+        auto res = EventWrite(h_, &evt, 0, nullptr);
+        if (res != ERROR_SUCCESS) {
+            throw std::system_error(res, std::system_category());
+        }
+    }
+
+    void write(
+            const EVENT_DESCRIPTOR& evt,
+            std::initializer_list<manifest_event_data> data)
+    {
+        EVENT_DATA_DESCRIPTOR *dc;
+        std::size_t i;
+
+        dc = reinterpret_cast<EVENT_DATA_DESCRIPTOR *>(_malloca(
+                data.size() * sizeof(EVENT_DATA_DESCRIPTOR)));
+        i = 0;
+
+        try {
+            for (const auto& d : data) {
+                EventDataDescCreate(&dc[i++], d.address(), d.length());
+            }
+        } catch (...) {
+            _freea(dc);
+            throw;
+        }
+
+        auto res = EventWrite(h_, &evt, static_cast<ULONG>(data.size()), dc);
+        _freea(dc);
+
+        if (res != ERROR_SUCCESS) {
+            throw std::system_error(res, std::system_category());
+        }
+    }
 private:
     guid id_;
     REGHANDLE h_;
